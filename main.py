@@ -101,9 +101,9 @@ def shorted_path(G, u, v, dmin, depth, path, node=True):
                     shorted_path(G, u, neighbour, depth[neighbour], depth, path, node)
 
 
-def Dijkstra(G, u, v, path_flag=False,node=True):
+def Dijkstra(G, u, v, path_flag=False, node=True):
     """狄杰斯特拉算法，求u,v最短距离，用于有权图
-    path_flag默认为False，返回int型数值;为True时需要求出最短路径，返回所有最短路径的顶点，返回list
+    path_flag默认为False，返回最短距离 ;为True时需要返回所有最短路径的顶点，返回list
         path_flag为true时，node默认为True返回顶点，node为False时返回边集合
 
     """
@@ -120,7 +120,7 @@ def Dijkstra(G, u, v, path_flag=False,node=True):
         if nx.get_edge_attributes(G, "weight"):
             depth[neighbour] = G.edges[u, neighbour]['weight']
         else:
-            depth[neighbour]=depth[u]+1
+            depth[neighbour] = depth[u] + 1
     while False in visit:
         node_next_visit = -1
         min = inf
@@ -132,15 +132,16 @@ def Dijkstra(G, u, v, path_flag=False,node=True):
         visit[node_next_visit] = True
         for neighbour in G.neighbors(node_next_visit):
             if nx.get_edge_attributes(G, "weight"):
-                    if depth[node_next_visit]+G.edges[node_next_visit, neighbour]['weight']<depth[neighbour]:
-                        depth[neighbour] = depth[node_next_visit]+G.edges[node_next_visit, neighbour]['weight']
+                if depth[node_next_visit] + G.edges[node_next_visit, neighbour]['weight'] < depth[neighbour]:
+                    depth[neighbour] = depth[node_next_visit] + G.edges[node_next_visit, neighbour]['weight']
             else:
                 depth[neighbour] = depth[node_next_visit] + 1
-        if not path_flag and depth[v] != inf:
+        if not path_flag and depth[v] != inf and min:
             return depth[v]
     path_set = set()
-    shorted_path(G,u,v,depth[v],depth,path_set,node)
+    shorted_path(G, u, v, depth[v], depth, path_set, node)
     return path_set
+
 
 class PPL:
     """
@@ -148,6 +149,7 @@ class PPL:
                 labelScheme是一个大字典 L={1:L1,2:L2 .....  k:Lk}  k为顶点，Lk为k点的label
                 :return L:所有顶点的label scheme
                 """
+
     def __init__(self, file, split):
         self.G = read(file, split)
 
@@ -278,14 +280,38 @@ class QBS:
         for i in range(number_landmark):
             R_list.append(degrees[i][0])
 
-    def get_bound(self,sketch,u,v):
+    def _get_bound(self, sketch, R, u):
         """
         获取边界
-        :return [dTuv,du_,dv_]:dTuv为 sparsified graph中的搜索上限，du_，dv_用于指导双向搜索中的搜索方向。
+        :param sketch: 草图
+        :param R: landmark集合
+        :param u:所求顶点
+        :return du_:du_用于指导双向搜索中的搜索方向。
         """
-        dTuv = Dijkstra(sketch,u,v)
-
-
+        du_ = 0
+        node = len(R)
+        depth = {}
+        for i in R:
+            depth[i] = -1
+        visit = [False] * node
+        for neighbour in sketch.neighbors(u):
+            depth[neighbour] = sketch.edges[u, neighbour]['weight']
+        while False in visit:
+            max1 = -1
+            next = -1
+            for i in range(node):
+                if not visit[i]:
+                    if depth[R[i]] > max1:
+                        max1 = depth[R[i]]
+                        next = i
+            visit[next] = True
+            du_ = max1
+            for neighbour in sketch.neighbors(R[next]):
+                if neighbour not in R:
+                    continue
+                if depth[neighbour]<depth[R[next]]+sketch.edges[neighbour,R[next]]['weight']:
+                    depth[neighbour] = depth[R[next]] + sketch.edges[neighbour, R[next]]['weight']
+        return du_
     def construct_labelScheme(self):
         G1 = self.G
         labelscheme = self.labelscheme
@@ -362,24 +388,26 @@ class QBS:
             sketch.add_edge(v, r_, weight=labelscheme.L[v][r_])
             if r == r_:
                 continue
-            list = Dijkstra(labelscheme.metaGraph, r, r_, True,False)
-            for i,j in list:
-                sketch.add_edge(i, j, weight=labelscheme.metaGraph.edges[i,j]['weight'])
-    def compute_shortedPathGraph(self,u,v):
-        G1 =self.G
-        R_list = self.R_list
+            list = Dijkstra(labelscheme.metaGraph, r, r_, True, False)
+            for i, j in list:
+                sketch.add_edge(i, j, weight=labelscheme.metaGraph.edges[i, j]['weight'])
+
+    def compute_shortedPathGraph(self, u, v):
+        G1 = self.G
+        R = self.R_list
         labelscheme = self.labelscheme
         sketch = self.sketch
         if not labelscheme.L:
             self.construct_labelScheme()
-        if sketch.size()==0:
-            self.construct_sketch(u,v)
-            
-
+        if sketch.size() == 0:
+            self.construct_sketch(u, v)
+        dTuv = Dijkstra(G1,u,v)
+        du_ = self._get_bound(sketch,R,u)
+        dv_ = self._get_bound(sketch,R,v)
+        print(dTuv,du_,dv_)
 
 QBS = QBS("QBS.txt", " ")
 PPL = PPL("PPL.txt", " ")
 draw(QBS.G)
-QBS.construct_sketch(6, 11)
+QBS.compute_shortedPathGraph(6,11)
 draw(QBS.sketch)
-
