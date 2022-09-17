@@ -2,6 +2,8 @@
     @author  huangzhuo
     @date    2022/9/15 19:42
     @File    main.py
+
+    用于快速大型无权无向图的最短路径图
 """
 import itertools
 import math
@@ -16,16 +18,24 @@ import matplotlib.pyplot as plt
 inf = 99999
 
 
-def read(file, split):
+def read(file):
     """
            :param file:文件名
-           :param split:行内分隔符
            :return graph:返回生成的无向图
        """
     G1 = nx.Graph()
     temp = [-1, -1]
+    split = None
     with open(file, mode='r') as f:
         for line in f:
+            if line[0] == "#":
+                continue
+            if "\t" in line:
+                split = "\t"
+            elif "," in line:
+                split = ","
+            else:
+                split = " "
             temp = line.split(split)
             G1.add_edge(int(temp[0]), int(temp[1]))
     return G1
@@ -37,6 +47,7 @@ def draw(G):
            """
     if G is None:
         print("图为空")
+        return
     subax1 = plt.subplot(111)
     weights = nx.get_edge_attributes(G, "weight")
     if weights:
@@ -56,6 +67,7 @@ def BFS(G, u, v, path_flag=False, node=True):
     """
 
     if u == v: return 0
+    if not path_flag and G.has_edge(u, v): return 1
     Q = deque()
     depth = [inf] * (G.number_of_nodes() + 1)
     depth[u] = 0
@@ -82,7 +94,7 @@ def shorted_path(G, u, v, dmin, depth, path, node=True):
     :param v: v顶点
     :param dmin: u顶点到v顶点的最短距离
     :param depth: u顶点到所有顶点的距离集合
-    :param path: u,v顶点之间的最短路径顶点集合
+    :param path: u,v顶点之间的最短路径顶点集合，或边集合
     """
     for neighbour in G.neighbors(v):
         if nx.get_edge_attributes(G, "weight"):
@@ -150,8 +162,8 @@ class PPL:
                 :return L:所有顶点的label scheme
                 """
 
-    def __init__(self, file, split):
-        self.G = read(file, split)
+    def __init__(self, file):
+        self.G = read(file)
 
     def construct_labelScheme(self):
         """
@@ -215,9 +227,9 @@ class PPL:
         L = self.construct_labelScheme()
         G = nx.Graph()
         # -------------------------- 实时计算 ----------------------------------------------------------------
-        start = time.clock()
+        start = time.perf_counter_ns()
         self._SPG(u, v, L, G)
-        end = time.clock()
+        end = time.perf_counter_ns()
         # ------------------------------------------------------------------------------------------
 
         return G
@@ -254,8 +266,8 @@ class LabelScheme:
 
 
 class QBS:
-    def __init__(self, file, split):
-        self.G = read(file, split)
+    def __init__(self, file):
+        self.G = read(file)
         # landmark集合
         self.R_list = []
         # labelling scheme
@@ -309,10 +321,71 @@ class QBS:
             for neighbour in sketch.neighbors(R[next]):
                 if neighbour not in R:
                     continue
-                if depth[neighbour]<depth[R[next]]+sketch.edges[neighbour,R[next]]['weight']:
+                if depth[neighbour] < depth[R[next]] + sketch.edges[neighbour, R[next]]['weight']:
                     depth[neighbour] = depth[R[next]] + sketch.edges[neighbour, R[next]]['weight']
         return du_
+
+    def _pick_search(self, u, v, Pu, Pv, du_, dv_, du, dv):
+        """
+            u,v选择策略，选择执行哪一个方向的bi-directional search
+         """
+        # 都满足，或者都不满足
+        if (du_ > du and dv_ > dv) or (du_ <= du and dv_ <= dv):
+            if len(Pu) > len(Pv):
+                return v
+            else:
+                return u
+        if du_ > du:
+            return u
+        if dv_ > dv:
+            return v
+
+    def _reversed_search(self, landmark_set, G, u, v, depthu, depthv):
+        """ 反向搜索,绘制shortedPathGraph """
+        SPG = nx.Graph()
+        path_edge = set()
+        for i in landmark_set:
+            shorted_path(G, u, i, depthu[i], depthu, path_edge, False)
+            shorted_path(G, v, i, depthv[i], depthv, path_edge, False)
+        SPG.add_edges_from(list(path_edge))
+        return SPG
+
+    def _recover_search(self, G, labelscheme, Zu, Zv, sparsified_graph, R, u, v, depthu, depthv):
+        SPG = nx.Graph()
+        # r与r'之间的路径恢复
+        for r, r_ in labelscheme.metaGraph.edges():
+            if labelscheme.metaGraph.edges[r, r]['weight'] > 1:
+                next_arr = deque()
+                next_arr.append(r)
+                while next_arr:
+                    next = next_arr.popleft()
+                    for neighbour in G.neighbors(next):
+                        if neighbour in R:
+                            continue
+                        if labelscheme.L[neighbour][r] + labelscheme.L[neighbour][r_] == \
+                                labelscheme.metaGraph.edges[r, r]['weight']:
+                            SPG.add_edge(neighbour, next)
+                            if neighbour not in next_arr:
+                                next_arr.append(neighbour)
+            else:
+                SPG.add_edge(r, r_)
+        # u,v与r之间的恢复
+        edges_u=[]
+        edges_v=[]
+        for r in Zu:
+            for w in r:
+                edges_u = shorted_path(sparsified_graph, u, w, depthu[w], depthu, False)
+        for r in Zv:
+            for w in r:
+                edges_v = shorted_path(sparsified_graph, v, w, depthu[w], depthv, False)
+        SPG.add_edges_from(edges_u)
+        SPG.add_edges_from(edges_v)
+        return SPG
     def construct_labelScheme(self):
+        """
+
+        :return: QBS的labelscheme
+        """
         G1 = self.G
         labelscheme = self.labelscheme
         R_list = self.R_list
@@ -364,7 +437,7 @@ class QBS:
 
     def construct_sketch(self, u, v):
         """
-                构建所求顶点的sketch草图，用于指导搜索
+                构建所求顶点的sketch草图，用于指导搜索,返回草图
             """
         sketch = self.sketch
         G1 = self.G
@@ -391,7 +464,7 @@ class QBS:
             list = Dijkstra(labelscheme.metaGraph, r, r_, True, False)
             for i, j in list:
                 sketch.add_edge(i, j, weight=labelscheme.metaGraph.edges[i, j]['weight'])
-
+        return sketch
     def compute_shortedPathGraph(self, u, v):
         G1 = self.G
         R = self.R_list
@@ -399,15 +472,103 @@ class QBS:
         sketch = self.sketch
         if not labelscheme.L:
             self.construct_labelScheme()
+        sparsified_graph = G1.copy()
+        sparsified_graph.remove_nodes_from(R)
+        nodes_number = sparsified_graph.number_of_nodes()
         if sketch.size() == 0:
             self.construct_sketch(u, v)
-        dTuv = Dijkstra(G1,u,v)
-        du_ = self._get_bound(sketch,R,u)
-        dv_ = self._get_bound(sketch,R,v)
-        print(dTuv,du_,dv_)
+        dTuv = Dijkstra(G1, u, v)
+        du_ = self._get_bound(sketch, R, u)
+        dv_ = self._get_bound(sketch, R, v)
+        print(dTuv, du_, dv_)
+        # u，v各自遍历顶点的集合
+        Pu = []
+        Pv = []
+        # 各自的搜索深度
+        du = 0
+        dv = 0
+        # uv各自的遍历队列
+        Qu = deque()
+        Qv = deque()
+        # u，v各自的顶点深度数组
+        depthu = [inf] * (nodes_number + 1)
+        depthv = [inf] * (nodes_number + 1)
+        depthu[u] = 0
+        depthv[v] = 0
+        Qu.append([u, du])
+        Qv.append([v, dv])
+        # ---------------------bi-directional search 双向搜索---------------------------------------------------------------------------
+        while du + dv < dTuv:
+            t = self._pick_search(u, v, Pu, Pv, du_, dv_, du, dv)
+            if t == u:
+                while Qu:
+                    x = Qu.popleft()
+                    if x[1] == du:
+                        for neighbour in sparsified_graph.neighbors(x[0]):
+                            if depthu[neighbour] != inf:
+                                continue
+                            depthu[neighbour] = du + 1
+                            Qu.appendleft([neighbour, du + 1])
+                        Pu.append(x[0])
+                    else:
+                        Qu.appendleft(x)
+                        break
+                du += 1
+            if t == v:
+                while Qv:
+                    x = Qv.popleft()
+                    if x[1] == dv:
+                        for neighbour in sparsified_graph.neighbors(x[0]):
+                            if depthv[neighbour] != inf:
+                                continue
+                            depthv[neighbour] = dv + 1
+                            Qv.appendleft([neighbour, dv + 1])
+                        Pv.append(x[0])
+                    else:
+                        Qv.appendleft(x)
+                        break
+                dv += 1
+            if set(Pu).union(Pv):
+                break
+        # --------------------------------------------------------------------------------------------------------------------------------------------------
+        union_set = set(Pu).union(Pv)
+        SPG_in_sparsified_graph=None
+        # ---------------------reverse search 反向搜索-----------------------------------------------------------------------------------------------------------
+        if union_set:
+            SPG_in_sparsified_graph = self._reversed_search(union_set, sparsified_graph, u, v, depthu, depthv)
+        # -------------------------------------------------------------------------------------------------------------------------------------------------------
 
-QBS = QBS("QBS.txt", " ")
-PPL = PPL("PPL.txt", " ")
+        # ---------------------recover search 恢复搜索-------------------------------------------------------------------------------------------------------------
+        if du + dv == dTuv:
+            # 格式{r1:{w1,w2..wk},r2:{w1,w2..wk}...}
+            Zu = {}
+            Zv = {}
+            for r in R:
+                dru = Dijkstra(sketch, u, r)
+                dm = (dru - 1) if (dru - 1) < du else du
+                for w in sparsified_graph:
+                    if depthu[w] == dm and w in labelscheme.L and r in labelscheme.L[w] and dru == (
+                            depthu[w] + labelscheme.L[w][r]):
+                        if r not in Zu:
+                            Zu[r] = []
+                        else:
+                            Zu[r].append(w)
+            for r in R:
+                drv = Dijkstra(sketch, v, r)
+                dm = (drv - 1) if (drv - 1) < dv else dv
+                for w in sparsified_graph:
+                    if depthu[w] == dm and w in labelscheme.L and r in labelscheme.L[w] and drv == (
+                            depthu[w] + labelscheme.L[w][r]):
+                        if r not in Zv:
+                            Zv[r] = []
+                        else:
+                            Zv[r].append(w)
+            SPG_in_sketch = self._recover_search(G1,labelscheme,Zu,Zv,sparsified_graph,R,u,v,depthu,depthv)
+        # -------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+QBS = QBS("DataSet/QBS.txt")
+PPL = PPL("DataSet/QBS.txt")
+#QBS_SPG=QBS.compute_shortedPathGraph(6,11)
 draw(QBS.G)
-QBS.compute_shortedPathGraph(6,11)
-draw(QBS.sketch)
+draw(QBS.compute_shortedPathGraph(6,11))
