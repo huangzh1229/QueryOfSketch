@@ -53,9 +53,8 @@ def draw(G):
 
 
 G  =read("DataSet/QBS.txt")
-for i,j in G.edges():
-    print(i,j)
-a = deque()
-a.append(1)
-print(a.index(1))
-print(2 in a)
+Pu=[1]
+Pv=[2]
+if set(Pu).intersection(set(Pv)):
+    print(1)
+else:print(2)
