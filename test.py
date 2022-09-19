@@ -3,7 +3,9 @@ from collections import deque
 import networkx as nx
 from matplotlib import pyplot as plt
 
+import multiprocessing as mp
 
+print("Number of processors:", mp.cpu_count())
 # G =  nx.petersen_graph()
 # x = list(G.degree())
 # print(x)
@@ -53,8 +55,4 @@ def draw(G):
 
 
 G  =read("DataSet/QBS.txt")
-Pu=[1]
-Pv=[2]
-if set(Pu).intersection(set(Pv)):
-    print(1)
-else:print(2)
+print(G.degree())

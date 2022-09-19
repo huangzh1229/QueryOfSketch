@@ -59,6 +59,12 @@ def draw(G):
         nx.draw(G, with_labels=True, font_weight='bold')
     plt.show()
 
+def print_labelscheme(labelscheme):
+    for i, j in labelscheme.items():
+        print("\n" + str(i))
+        for x, y in j.items():
+            print((x, y), end="")
+    print()
 
 def BFS(G, u, v, path_flag=False, node=True):
     """ BFS广度优先搜索，求u，v之间的最短距离
@@ -170,6 +176,9 @@ class PPL:
     def __init__(self, file):
         self.G = read(file)
         self.shorted_distance = -1
+        self.construct_time = -1
+        self.compute_time = -1
+
 
     def construct_labelScheme(self):
         """
@@ -177,49 +186,55 @@ class PPL:
         :return:
         """
         G1 = self.G
-        Q = deque()
         L = {}
-        nodes = G1.number_of_nodes()
-        k = random.choice(list(G1.nodes()))
-        Lk_1 = {}
-        while nodes > 0:
-            L[k] = self._generate_label(k, Lk_1)
-            nodes -= 1
-            if nodes == 0: break
-            for neighbour in G1.neighbors(k):
-                # k的邻点neighbour仍没有label
-                if neighbour not in L:
-                    if neighbour not in Q:
-                        Q.append(neighbour)
-            Lk_1 = L[k]
-            k = Q.popleft()
+        nodes = []
+        nodes_number = G1.number_of_nodes()
+        degree = list(G1.degree())
+        degree.sort(key=lambda x: x[1], reverse=True)
+        for i in range(nodes_number):
+            nodes.append(degree[i][0])
+        i=0
+        k_1 = -1
+        while i<nodes_number:
+            k = nodes[i]
+            L = self._generate_label(k, L)
+            i += 1
 
         return L
 
     def _generate_label(self, k, Lk_1):
         """
-           :param k 所要求的顶点
-           :param Lk_1 k的邻点k-1的label
-           :return Lk 返回k点的label
+           :param k 第k次遍历的landmark
+           :param Lk_1 前k-1次遍历所得的label
+           :return Lk 返回该次遍历的结果
            """
         G1 = self.G
         Q1 = deque()
         depth = [inf] * (G1.number_of_nodes() + 1)
         depth[k] = 0
-        Lk = {}
+        Lk = Lk_1.copy()
         Q1.append(k)
         while Q1:
+            flag = False
             u = Q1.popleft()
             # Lk-1非空
             if Lk_1:
-                if k in Lk_1 and u in Lk_1:
-                    if Lk_1[k] + Lk_1[u] < depth[u]:
-                        continue
-            Lk[u] = depth[u]
+                for i in Lk_1.keys():
+                    if i==k:continue
+                    if k in Lk_1[i] and u in Lk_1[i]:
+                        if Lk_1[i][k] + Lk_1[i][u] < depth[u]:
+                            flag=True
+            if flag:continue
+            if u not in Lk:
+                Lk[u]={}
+            Lk[u][k] = depth[u]
             if Lk_1:
-                if k in Lk_1 and u in Lk_1:
-                    if Lk_1[k] + Lk_1[u] == depth[u]:
-                        continue
+                for i in Lk_1.keys():
+                    if k in Lk_1[i] and u in Lk_1[i]:
+                        if i == k: continue
+                        if Lk_1[i][k] + Lk_1[i][u] == depth[u]:
+                            flag=True
+            if flag: continue
             for neighbour in G1.neighbors(u):
                 # 已经遍历过的点跳过
                 if depth[neighbour] != inf:
@@ -230,12 +245,18 @@ class PPL:
 
     def compute_shortedPathGraph(self, u, v):
         """ :return G u,v两点的最短路径图 """
+        # --------------------------离线计算 ----------------------------------------------------------------
+        start = time.perf_counter()
         L = self.construct_labelScheme()
+        end = time.perf_counter()
+        self.construct_time =end-start
+        # ------------------------------------------------------------------------------------------
         G = nx.Graph()
         # -------------------------- 实时计算 ----------------------------------------------------------------
-        start = time.perf_counter_ns()
+        start = time.perf_counter()
         self._SPG(u, v, L, G)
-        end = time.perf_counter_ns()
+        end = time.perf_counter()
+        self.construct_time = end - start
         # ------------------------------------------------------------------------------------------
 
         return G
@@ -283,6 +304,8 @@ class QBS:
         # sketch
         self.sketch = nx.Graph()
         self.shorted_distance = -1
+        self.construct_time=-1
+        self.compute_time=-1
 
     def _landmark_number_strategy(self, node):
         """ R需要满足两个条件：R属于V
@@ -484,12 +507,23 @@ class QBS:
         return sketch
 
     def compute_shortedPathGraph(self, u, v):
+        """
+        注：目前无法处理u,vi其中一个是landmark或者u,v都是landmark的情况，需要完善代码。
+        u,v其中一个是landmark时，构建完labelscheme就可以开始r与u/v之间恢复搜索
+        u,v都是landmark，构建完meta-graph开始r与r'之间的恢复搜索
+               """
         G1 = self.G
         R = self.R_list
         labelscheme = self.labelscheme
         sketch = self.sketch
+        # --------------------离线计算-----------------------------------------------------------------------------------------------------------------------
+        start = time.perf_counter()
         if not labelscheme.L:
             self.construct_labelScheme()
+        end = time.perf_counter()
+        self.construct_time = end-start
+        # --------------------------------------------------------------------------------------------------------------------------------------------------
+        start = time.perf_counter()
         sparsified_graph = G1.copy()
         sparsified_graph.remove_nodes_from(R)
         nodes_number = G1.number_of_nodes()
@@ -562,7 +596,6 @@ class QBS:
 
         # ---------------------recover search 恢复搜索-------------------------------------------------------------------------------------------------------------
         if du + dv == dTuv:
-            self.shorted_distance = dTuv
             # 格式{r1:{w1,w2..wk},r2:{w1,w2..wk}...}
             Zu = {}
             Zv = {}
@@ -586,6 +619,8 @@ class QBS:
                         Zv[r].append(w)
             SPG_in_sketch = self._recover_search(G1, labelscheme, Zu, Zv, sparsified_graph, R, u, v, depthu, depthv)
         # -------------------------------------------------------------------------------------------------------------------------------------------------------
+        end = time.perf_counter()
+        self.compute_time = end - start
         if SPG_in_sketch is not None and SPG_in_sparsified_graph is not None:
             SPG_in_sketch.add_edges_from(SPG_in_sparsified_graph.edges())
             return SPG_in_sketch
@@ -593,13 +628,23 @@ class QBS:
             return SPG_in_sketch if SPG_in_sketch is not None else SPG_in_sparsified_graph
 
 
-QBS = QBS("DataSet/facebook_combined.txt")
-PPL = PPL("DataSet/facebook_combined.txt")
-print("BFS:" + str(BFS(QBS.G, 6, 11)))
-print("Dijkstra:" + str(Dijkstra(QBS.G, 6, 11)))
-PPL_SPG = PPL.compute_shortedPathGraph(6, 11)
-# draw(PPL.compute_shortedPathGraph(6, 11))
-QBS_SPG = QBS.compute_shortedPathGraph(6, 11)
-# draw(QBS.compute_shortedPathGraph(6, 11))
-print(PPL.shorted_distance)
-print(QBS.shorted_distance)
+QBS = QBS("DataSet/PPL.txt")
+PPL = PPL("DataSet/PPL.txt")
+u=7
+v=3
+start = time.time()
+BFS_shortedDistance = str(BFS(QBS.G,u,v))
+end = time.time()
+print("BFS:" + BFS_shortedDistance+"\tTime consuming:"+str(end-start))
+
+start = time.perf_counter()
+Dijkstra_shortedDistance = str(Dijkstra(QBS.G, u,v))
+end = time.perf_counter()
+print("Dijkstra:" + Dijkstra_shortedDistance+"\tTime consuming:"+str(end-start))
+
+PPL_SPG = PPL.compute_shortedPathGraph(u,v)
+print("PPL:%d\tconstruct time:%f\tcompute time:%f"%(PPL.shorted_distance,PPL.construct_time,PPL.compute_time))
+draw(PPL_SPG)
+# QBS_SPG = QBS.compute_shortedPathGraph(u,v)
+# print("QBS:%d\tconstruct time:%f\tcompute time:%f"%(QBS.shorted_distance,QBS.construct_time,QBS.compute_time))
+
